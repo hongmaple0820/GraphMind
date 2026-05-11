@@ -1,0 +1,120 @@
+{
+  "appId": "com.graphmind.desktop",
+  "productName": "GraphMind",
+  "copyright": "Copyright 2026 GraphMind",
+  "directories": {
+    "output": "dist/build",
+    "buildResources": "resources"
+  },
+  "files": [
+    "dist/main/**/*",
+    "dist/preload/**/*",
+    "dist/renderer/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "resources",
+      "to": "resources",
+      "filter": ["**/*"]
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.productivity",
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["universal"]
+      },
+      {
+        "target": "zip",
+        "arch": ["universal"]
+      }
+    ],
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "resources/entitlements.mac.plist",
+    "entitlementsInherit": "resources/entitlements.mac.plist",
+    "minimumSystemVersion": "12.0.0"
+  },
+  "dmg": {
+    "contents": [
+      { "x": 130, "y": 220 },
+      { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+    ]
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "resources/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "allowElevation": true,
+    "installerIcon": "resources/icon.ico",
+    "uninstallerIcon": "resources/icon.ico",
+    "installerHeaderIcon": "resources/icon.ico",
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": true
+  },
+  "linux": {
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64"]
+      },
+      {
+        "target": "deb",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "flatpak",
+        "arch": ["x64"]
+      }
+    ],
+    "category": "Office",
+    "icon": "resources",
+    "maintainer": "GraphMind Team",
+    "vendor": "GraphMind",
+    "description": "Local-first AI-powered knowledge base with graph-driven navigation"
+  },
+  "appImage": {
+    "license": "LICENSE"
+  },
+  "deb": {
+    "depends": ["libnotify4", "libxtst6", "libnss3"]
+  },
+  "flatpak": {
+    "finishArgs": [
+      "--socket=wayland",
+      "--socket=x11",
+      "--socket=pulseaudio",
+      "--share=network",
+      "--share=ipc",
+      "--device=dri",
+      "--filesystem=home"
+    ]
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "graphmind",
+    "repo": "graphmind-desktop",
+    "releaseType": "release"
+  },
+  "compression": "maximum",
+  "removePackageScripts": true,
+  "asar": true,
+  "asarUnpack": [
+    "**/*.node",
+    "**/vectra/**/*"
+  ]
+}
