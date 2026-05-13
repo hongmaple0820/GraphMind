@@ -43,7 +43,7 @@ export class LocalProvider implements LLMProvider {
       n_predict: request.maxTokens ?? this.config.maxTokens ?? 2048,
       temperature: request.temperature ?? 0.7,
       top_p: request.topP ?? 0.9,
-      stop: request.stopSequences ?? ['</s>', '[INST]'],
+      stop: request.stopSequences ?? ['</s>', '<|im_end|>'],
       stream: false,
     };
 
@@ -75,7 +75,7 @@ export class LocalProvider implements LLMProvider {
       n_predict: request.maxTokens ?? this.config.maxTokens ?? 2048,
       temperature: request.temperature ?? 0.7,
       top_p: request.topP ?? 0.9,
-      stop: request.stopSequences ?? ['</s>', '[INST]'],
+      stop: request.stopSequences ?? ['</s>', '<|im_end|>'],
       stream: true,
     };
 
@@ -133,15 +133,15 @@ export class LocalProvider implements LLMProvider {
 
     for (const msg of request.messages) {
       if (msg.role === 'system') {
-        prompt += `<|system|>\n${msg.content}</s>\n`;
+        prompt += `<|im_start|>system\n${msg.content}<|im_end|>\n`;
       } else if (msg.role === 'user') {
-        prompt += `<|user|>\n${msg.content}</s>\n`;
+        prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
       } else if (msg.role === 'assistant') {
-        prompt += `<|assistant|)\n${msg.content}</s>\n`;
+        prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
       }
     }
 
-    prompt += '<|assistant|)\n';
+    prompt += '<|im_start|>assistant\n';
     return prompt;
   }
 }

@@ -4,6 +4,11 @@ import path from 'node:path';
 import { notesIndex, parseCache } from './file-handlers.js';
 import type { GraphNode, GraphEdge, EdgeType } from '@shared/types/graph.js';
 
+interface StoredGraphEdge extends GraphEdge {
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 const graphNodes = new Map<string, GraphNode>();
 const graphEdges = new Map<string, GraphEdge>();
 const adjacency = new Map<string, Set<string>>();
@@ -25,7 +30,9 @@ async function persistGraph(): Promise<void> {
     };
     await fs.mkdir(path.dirname(graphCachePath), { recursive: true });
     await fs.writeFile(graphCachePath, JSON.stringify(data), 'utf-8');
-  } catch {}
+  } catch (err) {
+    console.warn('Failed to persist graph cache:', err);
+  }
 }
 
 async function loadGraphFromCache(): Promise<boolean> {
@@ -50,7 +57,9 @@ async function loadGraphFromCache(): Promise<boolean> {
       }
       return true;
     }
-  } catch {}
+  } catch (err) {
+    console.warn('Failed to load graph cache:', err);
+  }
   return false;
 }
 
@@ -58,7 +67,7 @@ function addEdge(source: string, target: string, type: EdgeType, weight: number,
   const id = `${source}--${target}--${type}`;
   if (graphEdges.has(id)) return;
 
-  const edge: GraphEdge = {
+  const edge: StoredGraphEdge = {
     id,
     source,
     target,
@@ -86,10 +95,11 @@ function removeEdgesForNode(nodeId: string) {
   }
   for (const id of toRemove) {
     graphEdges.delete(id);
-    const edge = adjacency.get(id.split('--')[0]);
-    if (edge) edge.delete(id);
-    const revEdge = reverseIndex.get(id.split('--')[1]);
-    if (revEdge) revEdge.delete(id);
+    const parts = id.split('--');
+    const forward = adjacency.get(parts[0]!);
+    if (forward) forward.delete(id);
+    const reverse = reverseIndex.get(parts[1]!);
+    if (reverse) reverse.delete(id);
   }
 }
 
@@ -115,7 +125,7 @@ function rebuildGraphFromIndex() {
   for (const [noteId, parseResult] of parseCache) {
     for (const link of parseResult.wikiLinks) {
       const targetId = link.target.replace(/\.(md|markdown)$/, '');
-      if (graphNodes.has(targetId) || notesIndex.has(targetId)) {
+      if (targetId && (graphNodes.has(targetId) || notesIndex.has(targetId))) {
         addEdge(noteId, targetId, 'link_ref', 1.0, {
           context: link.alias,
           position: { line: link.line },
@@ -125,13 +135,13 @@ function rebuildGraphFromIndex() {
 
     const noteTags = new Set([
       ...(parseResult.frontmatter?.tags ?? []),
-      ...parseResult.tags.map((t) => t.name),
+      ...parseResult.tags.map((t: { name: string }) => t.name),
     ]);
     for (const tag of noteTags) {
       for (const [otherId, otherMeta] of notesIndex) {
         if (otherId === noteId) continue;
         if (otherMeta.tags.includes(tag)) {
-          addEdge(noteId, otherId, 'tag_cooccurrence', 0.5, { tag });
+          addEdge(noteId!, otherId!, 'tag_cooccurrence', 0.5, { tag });
         }
       }
     }
@@ -153,14 +163,14 @@ function addSemanticSimilarityEdges() {
   const MAX_SEMANTIC_EDGES_PER_NODE = 5;
 
   for (let i = 0; i < nodeIds.length; i++) {
-    const idA = nodeIds[i];
+    const idA = nodeIds[i]!;
     const tagsA = nodeTagSets.get(idA) ?? new Set();
     if (tagsA.size === 0) continue;
 
     const candidates: Array<{ id: string; similarity: number }> = [];
 
     for (let j = i + 1; j < nodeIds.length; j++) {
-      const idB = nodeIds[j];
+      const idB = nodeIds[j]!;
       const tagsB = nodeTagSets.get(idB) ?? new Set();
       if (tagsB.size === 0) continue;
 
@@ -169,7 +179,7 @@ function addSemanticSimilarityEdges() {
 
       const jaccard = unionSize > 0 ? intersectionSize / unionSize : 0;
 
-      const existingEdge = graphEdges.get(`${idA}--${idB}--link_ref`) ?? graphEdges.get(`${idB}--${idA}--link_ref`);
+      const existingEdge = graphEdges.get(`${idA}--${idB!}--link_ref`) ?? graphEdges.get(`${idB!}--${idA}--link_ref`);
       const hasDirectLink = !!existingEdge;
 
       const finalSimilarity = hasDirectLink ? jaccard * 0.5 : jaccard;

@@ -1,5 +1,5 @@
 import { LocalDocumentIndex } from 'vectra';
-import path from 'node:path';
+import type { EmbeddingsModel, EmbeddingsResponse, MetadataTypes } from 'vectra/lib/types.js';
 import crypto from 'node:crypto';
 
 export interface RAGResult {
@@ -11,6 +11,25 @@ export interface RAGResult {
 
 export interface EmbeddingFunction {
   (texts: string[]): Promise<number[][]>;
+}
+
+class EmbeddingAdapter implements EmbeddingsModel {
+  readonly maxTokens = 8192;
+  private embedFn: EmbeddingFunction;
+
+  constructor(embedFn: EmbeddingFunction) {
+    this.embedFn = embedFn;
+  }
+
+  async createEmbeddings(inputs: string | string[]): Promise<EmbeddingsResponse> {
+    try {
+      const texts = Array.isArray(inputs) ? inputs : [inputs];
+      const output = await this.embedFn(texts);
+      return { status: 'success', output };
+    } catch (err) {
+      return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+    }
+  }
 }
 
 export class RAGService {
@@ -27,20 +46,18 @@ export class RAGService {
   }
 
   async init(): Promise<void> {
-    this.index = new LocalDocumentIndex({
+    const config: ConstructorParameters<typeof LocalDocumentIndex>[0] = {
       folderPath: this.indexPath,
-      embeddings: this.embedFn ? {
-        create: async (text: string) => {
-          if (!this.embedFn) throw new Error('No embedding function');
-          const results = await this.embedFn([text]);
-          return results[0];
-        },
-      } : undefined,
-    });
+    };
+
+    if (this.embedFn) {
+      config.embeddings = new EmbeddingAdapter(this.embedFn);
+    }
+
+    this.index = new LocalDocumentIndex(config);
 
     await this.index.createIndex({
       version: 1,
-      deleteOldData: false,
     });
   }
 
@@ -50,18 +67,25 @@ export class RAGService {
     const chunks = this.chunkText(content, 512, 64);
     for (let i = 0; i < chunks.length; i++) {
       const docId = `${noteId}::chunk-${i}`;
-      const chunkHash = crypto.createHash('sha256').update(chunks[i]).digest('hex').slice(0, 12);
+      const chunkHash = crypto.createHash('sha256').update(chunks[i]!).digest('hex').slice(0, 12);
 
       try {
-        await this.index.addDocument(docId, chunks[i], {
+        const meta: Record<string, MetadataTypes> = {
           noteId,
           chunkIndex: i,
           chunkHash,
           totalChunks: chunks.length,
-          ...metadata,
-        });
-      } catch {
-        // document may already exist
+        };
+        if (metadata) {
+          for (const [k, v] of Object.entries(metadata)) {
+            if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+              meta[k] = v;
+            }
+          }
+        }
+        await this.index.upsertDocument(docId, chunks[i]!, undefined, meta);
+      } catch (err) {
+        console.warn('Failed to add document chunk:', err);
       }
     }
   }
@@ -72,26 +96,36 @@ export class RAGService {
     try {
       const docs = await this.index.listDocuments();
       for (const doc of docs) {
-        if (doc.id.startsWith(`${noteId}::`)) {
-          await this.index.deleteDocument(doc.id);
+        const docId = doc.id ?? doc.uri;
+        if (docId.startsWith(`${noteId}::`)) {
+          await this.index.deleteDocument(docId);
         }
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to remove document:', err);
+    }
   }
 
   async query(query: string, topK: number = 5): Promise<RAGResult[]> {
     if (!this.index) throw new Error('RAGService not initialized');
 
     const results = await this.index.queryDocuments(query, {
-      topK,
+      maxDocuments: topK,
     });
 
-    return results.map((r) => ({
-      content: r.document?.text ?? r.text ?? '',
-      source: r.document?.meta?.noteId ?? r.id ?? '',
-      score: r.score ?? 0,
-      metadata: r.document?.meta as Record<string, unknown> | undefined,
-    }));
+    const ragResults: RAGResult[] = [];
+    for (const r of results) {
+      const text = await r.loadText();
+      const meta = await r.loadMetadata();
+      ragResults.push({
+        content: text,
+        source: r.id ?? r.uri ?? '',
+        score: r.score ?? 0,
+        metadata: meta as Record<string, unknown> | undefined,
+      });
+    }
+
+    return ragResults;
   }
 
   async hybridQuery(query: string, topK: number = 5, graphResults?: string[]): Promise<RAGResult[]> {
@@ -131,13 +165,13 @@ export class RAGService {
   async indexVault(vaultPath: string, fileEntries: Array<{ noteId: string; filePath: string }>): Promise<{ indexed: number; skipped: number }> {
     if (!this.index) throw new Error('RAGService not initialized');
 
-    const fs = await import('node:fs/promises');
+    const fsMod = await import('node:fs/promises');
     let indexed = 0;
     let skipped = 0;
 
     for (const entry of fileEntries) {
       try {
-        const content = await fs.readFile(entry.filePath, 'utf-8');
+        const content = await fsMod.readFile(entry.filePath, 'utf-8');
         await this.addDocument(entry.noteId, content, { filePath: entry.filePath });
         indexed++;
       } catch {

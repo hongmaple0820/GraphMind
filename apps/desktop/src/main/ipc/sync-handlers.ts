@@ -1,5 +1,5 @@
 import type { IpcMain, BrowserWindow } from 'electron';
-import { SyncEngine, type SyncDecision, type ConflictStrategy } from '../services/sync/engine.js';
+import { SyncEngine, type ConflictStrategy } from '../services/sync/engine.js';
 import Store from 'electron-store';
 
 interface SyncConfig {
@@ -52,7 +52,7 @@ export function registerSyncHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
     const config = getSyncConfig();
     if (!config) return { success: false, error: 'Not configured' };
 
-    const vaultPath = (globalThis as any).__vaultPath as string | undefined;
+    const vaultPath = (globalThis as Record<string, unknown>).__vaultPath as string | undefined;
     if (!vaultPath) return { success: false, error: 'No vault path' };
 
     const engine = new SyncEngine({
@@ -72,7 +72,7 @@ export function registerSyncHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
     const config = getSyncConfig();
     if (!config) return { error: 'Not configured' };
 
-    const vaultPath = (globalThis as any).__vaultPath as string | undefined;
+    const vaultPath = (globalThis as Record<string, unknown>).__vaultPath as string | undefined;
     if (!vaultPath) return { error: 'No vault path' };
 
     isSyncing = true;
@@ -105,8 +105,8 @@ export function registerSyncHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
 
       mainWindow.webContents.send('sync:progress', { phase: 'done', completed: decisions.length, total: decisions.length });
       return { success: true, ...result };
-    } catch (err: any) {
-      return { error: err.message };
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err.message : String(err) };
     } finally {
       isSyncing = false;
       activeEngine = null;
@@ -117,7 +117,7 @@ export function registerSyncHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
     const config = getSyncConfig();
     if (!config) return { error: 'Not configured' };
 
-    const vaultPath = (globalThis as any).__vaultPath as string | undefined;
+    const vaultPath = (globalThis as Record<string, unknown>).__vaultPath as string | undefined;
     if (!vaultPath) return { error: 'No vault path' };
 
     const engine = new SyncEngine({
@@ -146,8 +146,8 @@ export function registerSyncHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
       };
 
       return { success: true, ...summary };
-    } catch (err: any) {
-      return { error: err.message };
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -169,7 +169,7 @@ export function registerSyncHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
     const config = getSyncConfig();
     if (!config) return { error: 'Not configured' };
 
-    const vaultPath = (globalThis as any).__vaultPath as string | undefined;
+    const vaultPath = (globalThis as Record<string, unknown>).__vaultPath as string | undefined;
     if (!vaultPath) return { error: 'No vault path' };
 
     isSyncing = true;
@@ -185,8 +185,8 @@ export function registerSyncHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
     try {
       const result = await engine.resumePendingUploads();
       return { success: true, ...result };
-    } catch (err: any) {
-      return { error: err.message };
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err.message : String(err) };
     } finally {
       isSyncing = false;
       activeEngine = null;

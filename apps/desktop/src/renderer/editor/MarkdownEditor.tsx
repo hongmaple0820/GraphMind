@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 import { EditorState, StateEffect, RangeSetBuilder } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, rectangularSelection, highlightSpecialChars, Decoration, DecorationSet, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -49,7 +49,9 @@ function buildWikiLinkDecorations(view: EditorView): DecorationSet {
     while ((match = regex.exec(text)) !== null) {
       const start = from + match.index;
       const end = start + match[0].length;
-      builder.add(start, end, Decoration.replace({ widget: new WikiLinkWidget(match[1].trim(), match[2]?.trim()) }));
+      const target = match[1]?.trim() ?? '';
+      const alias = match[2]?.trim();
+      builder.add(start, end, Decoration.replace({ widget: new WikiLinkWidget(target, alias) }));
     }
   }
   return builder.finish();
@@ -78,10 +80,10 @@ const wikiLinkCompletion = autocompletion({
     const textBefore = context.state.doc.sliceString(Math.max(0, context.pos - 50), context.pos);
     const match = textBefore.match(/\[\[([^\]]*?)$/);
     if (!match) return null;
-    const query = match[1].toLowerCase();
-    const noteNames: string[] = (window as any).__graphmind_note_names__ ?? [];
+    const query = match[1]?.toLowerCase() ?? '';
+    const noteNames: string[] = (window as unknown as Record<string, string[]>).__graphmind_note_names__ ?? [];
     const filtered = noteNames.filter((n) => n.toLowerCase().includes(query));
-    return { from: context.pos - match[1].length, options: filtered.slice(0, 20).map((name) => ({ label: name, type: 'text', apply: name + ']]', detail: 'note' })) };
+    return { from: context.pos - (match[1]?.length ?? 0), options: filtered.slice(0, 20).map((name) => ({ label: name, type: 'text', apply: name + ']]', detail: 'note' })) };
   }],
 });
 
@@ -95,7 +97,7 @@ const graphmindTheme = EditorView.theme({
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: '#94A3B8' },
 });
 
-const graphmindHighlightStyle = HighlightStyle.define([
+const darkHighlightStyle = HighlightStyle.define([
   { tag: tags.heading1, fontSize: '1.6em', fontWeight: '700', color: '#F1F5F9', lineHeight: '1.3' },
   { tag: tags.heading2, fontSize: '1.35em', fontWeight: '600', color: '#F1F5F9', lineHeight: '1.4' },
   { tag: tags.heading3, fontSize: '1.15em', fontWeight: '600', color: '#E0E7FF', lineHeight: '1.4' },
@@ -109,6 +111,22 @@ const graphmindHighlightStyle = HighlightStyle.define([
   { tag: tags.meta, color: '#475569' },
   { tag: tags.comment, color: '#475569' },
   { tag: tags.list, color: '#818CF8' },
+]);
+
+const lightHighlightStyle = HighlightStyle.define([
+  { tag: tags.heading1, fontSize: '1.6em', fontWeight: '700', color: '#1E293B', lineHeight: '1.3' },
+  { tag: tags.heading2, fontSize: '1.35em', fontWeight: '600', color: '#1E293B', lineHeight: '1.4' },
+  { tag: tags.heading3, fontSize: '1.15em', fontWeight: '600', color: '#312E81', lineHeight: '1.4' },
+  { tag: tags.emphasis, fontStyle: 'italic', color: '#4338CA' },
+  { tag: tags.strong, fontWeight: '700', color: '#312E81' },
+  { tag: tags.link, color: '#4F46E5', textDecoration: 'underline' },
+  { tag: tags.url, color: '#6366F1' },
+  { tag: tags.monospace, color: '#059669', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.9em' },
+  { tag: tags.quote, color: '#64748B', fontStyle: 'italic' },
+  { tag: tags.strikethrough, textDecoration: 'line-through', color: '#64748B' },
+  { tag: tags.meta, color: '#94A3B8' },
+  { tag: tags.comment, color: '#94A3B8' },
+  { tag: tags.list, color: '#4F46E5' },
 ]);
 
 interface MarkdownEditorProps {
@@ -130,6 +148,11 @@ export function MarkdownEditor({ value, onChange, onSave, onJumpToNote, readOnly
   onSaveRef.current = onSave;
   onJumpRef.current = onJumpToNote;
 
+  const isDark = typeof document !== 'undefined'
+    && document.documentElement.getAttribute('data-theme') !== 'light';
+
+  const highlightStyle = useMemo(() => isDark ? darkHighlightStyle : lightHighlightStyle, [isDark]);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -140,7 +163,7 @@ export function MarkdownEditor({ value, onChange, onSave, onJumpToNote, readOnly
         drawSelection(), rectangularSelection(), indentOnInput(),
         bracketMatching(), closeBrackets(), highlightActiveLine(), highlightSelectionMatches(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        syntaxHighlighting(graphmindHighlightStyle),
+        syntaxHighlighting(highlightStyle),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         wikiLinkCompletion,
         keymap.of([
@@ -148,7 +171,7 @@ export function MarkdownEditor({ value, onChange, onSave, onJumpToNote, readOnly
           ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab,
           { key: 'Mod-s', run: (v) => { onSaveRef.current?.(v.state.doc.toString()); return true; } },
         ]),
-        oneDark, graphmindTheme, wikiLinkStyle,
+        ...(isDark ? [oneDark] : []), graphmindTheme, wikiLinkStyle,
         WIKI_LINK_DECORATOR, wikiLinkClickHandler,
         EditorView.lineWrapping, EditorState.readOnly.of(readOnly),
         EditorView.updateListener.of((update) => {

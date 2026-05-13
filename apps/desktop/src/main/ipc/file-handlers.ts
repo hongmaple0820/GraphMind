@@ -1,6 +1,7 @@
 import type { IpcMain, BrowserWindow } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { FSWatcher } from 'node:fs';
 import { parseMarkdown, pathToNoteId, type ParseResult } from '@shared/parser/markdown.js';
 import { IncrementalIndexer } from '../services/indexer/incremental.js';
 
@@ -16,6 +17,7 @@ interface NoteMeta {
 const notesIndex = new Map<string, NoteMeta>();
 const parseCache = new Map<string, ParseResult>();
 let incrementalIndexer: IncrementalIndexer | null = null;
+let watcher: FSWatcher | null = null;
 
 function getIndexer(vaultPath: string): IncrementalIndexer {
   if (!incrementalIndexer) {
@@ -25,9 +27,15 @@ function getIndexer(vaultPath: string): IncrementalIndexer {
 }
 
 export function registerFileHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow) {
+
   ipcMain.handle('file:read', async (_event, args: { path: string }) => {
-    const content = await fs.readFile(args.path, 'utf-8');
-    return { content, encoding: 'utf-8' };
+    try {
+      const content = await fs.readFile(args.path, 'utf-8');
+      return { content, encoding: 'utf-8' };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: '', encoding: 'utf-8', error: msg };
+    }
   });
 
   ipcMain.handle('file:write', async (_event, args: { path: string; content: string }) => {
@@ -45,7 +53,7 @@ export function registerFileHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
       filePath: args.path,
       tags: [
         ...(parseResult.frontmatter?.tags ?? []),
-        ...parseResult.tags.map((t) => t.name),
+        ...parseResult.tags.map((t: { name: string }) => t.name),
       ],
       updatedAt: stat.mtimeMs,
       createdAt: stat.birthtimeMs,
@@ -97,7 +105,7 @@ export function registerFileHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
 
   ipcMain.handle('file:index-vault', async (_event, args: { vaultPath: string }) => {
     const indexer = getIndexer(args.vaultPath);
-    const count = await indexer.fullReindex();
+    await indexer.fullReindex();
 
     const entries = await scanMarkdownFiles(args.vaultPath);
     for (const entry of entries) {
@@ -113,16 +121,38 @@ export function registerFileHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
           filePath: entry.path,
           tags: [
             ...(result.frontmatter?.tags ?? []),
-            ...result.tags.map((t) => t.name),
+            ...result.tags.map((t: { name: string }) => t.name),
           ],
           updatedAt: stat.mtimeMs,
           createdAt: stat.birthtimeMs,
         });
-      } catch {
-        // skip unreadable files
+      } catch (err) {
+        console.warn('Failed to index file during vault scan:', err);
       }
     }
     return Array.from(notesIndex.values());
+  });
+
+  ipcMain.handle('file:watch', async (_event, args: { path: string }) => {
+    if (watcher) {
+      try { watcher.close(); } catch { /* ignore */ }
+    }
+
+    try {
+      const { watch } = await import('node:fs');
+      watcher = watch(args.path, { recursive: true }, (eventType, filename) => {
+        if (filename && (filename.endsWith('.md') || filename.endsWith('.markdown'))) {
+          mainWindow.webContents.send('file:watch-event', {
+            event: eventType,
+            path: path.join(args.path, filename),
+          });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
   });
 
   ipcMain.handle('file:incremental-index', async (_event, args: { vaultPath: string }) => {
@@ -149,12 +179,14 @@ export function registerFileHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow
           filePath: entry.filePath,
           tags: [
             ...(parseResult.frontmatter?.tags ?? []),
-            ...parseResult.tags.map((t) => t.name),
+            ...parseResult.tags.map((t: { name: string }) => t.name),
           ],
           updatedAt: stat.mtimeMs,
           createdAt: stat.birthtimeMs,
         });
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to index file during incremental update:', err);
+      }
     }
 
     for (const noteId of diff.deleted) {

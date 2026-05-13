@@ -1,7 +1,7 @@
 import type { IpcMain, BrowserWindow } from 'electron';
 import { RAGService } from '../services/rag/service.js';
 import { BM25Index } from '../services/rag/bm25.js';
-import { HybridSearchEngine, type HybridSearchResult } from '../services/rag/hybrid.js';
+import { HybridSearchEngine } from '../services/rag/hybrid.js';
 import { IncrementalIndexer } from '../services/indexer/incremental.js';
 import { getEmbeddingService, type EmbeddingProviderConfig } from '../services/rag/embedding.js';
 import path from 'node:path';
@@ -27,23 +27,38 @@ async function getRAGService(vaultPath: string): Promise<RAGService> {
       try {
         const embedFn = embeddingService.getEmbedFunction();
         return await embedFn(texts);
-      } catch {}
+      } catch (err) {
+        console.warn('Primary embedding failed, trying LLM provider:', err);
+      }
 
       try {
         const router = getOrCreateRouter();
         const provider = router.getPrimaryProvider();
-        if (provider && 'embed' in provider && typeof (provider as any).embed === 'function') {
-          return await (provider as any).embed(texts);
+        if (provider && 'embed' in provider) {
+          const embedFn = (provider as unknown as { embed: (t: string[]) => Promise<number[][]> }).embed;
+          if (typeof embedFn === 'function') {
+            return await embedFn(texts);
+          }
         }
-      } catch {}
+      } catch (err) {
+        console.warn('LLM provider embedding failed, using deterministic fallback:', err);
+      }
 
-      return texts.map(() => {
-        const embedding = new Array(384).fill(0);
-        for (let i = 0; i < 384; i++) {
-          embedding[i] = Math.random() - 0.5;
+      const dim = 384;
+      return texts.map((text) => {
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) {
+          hash = ((hash << 5) - hash) + text.charCodeAt(i);
+          hash = hash & hash;
         }
-        const norm = Math.sqrt(embedding.reduce((s: number, v: number) => s + v * v, 0));
-        return embedding.map((v: number) => v / norm);
+        const seed = Math.abs(hash);
+        const embedding = new Array(dim).fill(0);
+        for (let i = 0; i < dim; i++) {
+          const x = Math.sin(seed * (i + 1) * 0.0001) * 10000;
+          embedding[i] = x - Math.floor(x) - 0.5;
+        }
+        const norm = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0)) || 1;
+        return embedding.map((v) => v / norm);
       });
     });
 
@@ -67,7 +82,7 @@ async function getHybridEngine(vaultPath: string): Promise<HybridSearchEngine> {
   return hybridEngine;
 }
 
-export function registerRAGHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow) {
+export function registerRAGHandlers(ipcMain: IpcMain, _mainWindow: BrowserWindow) {
   ipcMain.handle('rag:query', async (_event, args: { query: string; topK?: number; vaultPath: string }) => {
     const engine = await getHybridEngine(args.vaultPath);
     const results = await engine.search(args.query, args.topK ?? 5);

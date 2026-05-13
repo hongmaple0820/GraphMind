@@ -39,13 +39,13 @@ export function parseMarkdown(content: string): ParseResult {
 
   const lines = content.split('\n');
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-    const line = lines[lineIdx];
+    const line = lines[lineIdx]!;
     const lineOffset = lines.slice(0, lineIdx).join('\n').length + (lineIdx > 0 ? 1 : 0);
 
     WIKI_LINK_REGEX.lastIndex = 0;
     while ((match = WIKI_LINK_REGEX.exec(line)) !== null) {
       wikiLinks.push({
-        target: match[1].trim(),
+        target: match[1]!.trim(),
         alias: match[2]?.trim(),
         from: lineOffset + match.index,
         to: lineOffset + match.index + match[0].length,
@@ -56,7 +56,7 @@ export function parseMarkdown(content: string): ParseResult {
     TAG_REGEX.lastIndex = 0;
     while ((match = TAG_REGEX.exec(line)) !== null) {
       tags.push({
-        name: match[1].trim(),
+        name: match[1]!.trim(),
         from: lineOffset + match.index + 1,
         to: lineOffset + match.index + match[0].length,
         line: lineIdx,
@@ -67,7 +67,7 @@ export function parseMarkdown(content: string): ParseResult {
   let frontmatter: FrontmatterData | null = null;
   const fmMatch = FRONTMATTER_REGEX.exec(content);
   if (fmMatch) {
-    frontmatter = parseYamlFrontmatter(fmMatch[1]);
+    frontmatter = parseYamlFrontmatter(fmMatch[1]!);
   }
 
   let title = '';
@@ -76,7 +76,7 @@ export function parseMarkdown(content: string): ParseResult {
   } else {
     const headingMatch = content.match(/^#\s+(.+)$/m);
     if (headingMatch) {
-      title = headingMatch[1].trim();
+      title = headingMatch[1]!.trim();
     }
   }
 
@@ -118,7 +118,7 @@ function parseYamlFrontmatter(yaml: string): FrontmatterData {
 
 export function pathToNoteId(filePath: string): string {
   const parts = filePath.replace(/\\/g, '/').split('/');
-  const filename = parts[parts.length - 1];
+  const filename = parts[parts.length - 1]!;
   return filename.replace(/\.(md|markdown)$/, '');
 }
 

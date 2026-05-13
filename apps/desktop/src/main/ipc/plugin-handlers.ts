@@ -1,6 +1,6 @@
 import type { IpcMain, BrowserWindow } from 'electron';
 import { PluginRegistry } from '../services/plugins/registry.js';
-import type { PluginPermission, PluginAPI } from '../services/plugins/types.js';
+import type { PluginPermission, PluginAPI, PluginExtensionPoint } from '../services/plugins/types.js';
 import path from 'node:path';
 
 let registry: PluginRegistry | null = null;
@@ -95,8 +95,8 @@ export function registerPluginHandlers(ipcMain: IpcMain, mainWindow: BrowserWind
       const instance = await reg.loadPlugin(manifest);
       await instance.activate();
       return { success: true };
-    } catch (err: any) {
-      return { error: err.message };
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -108,6 +108,6 @@ export function registerPluginHandlers(ipcMain: IpcMain, mainWindow: BrowserWind
 
   ipcMain.handle('plugins:extensions', async (_event, args: { vaultPath: string; type: string }) => {
     const reg = getRegistry(args.vaultPath);
-    return reg.getExtensions(args.type as any);
+    return reg.getExtensions(args.type as PluginExtensionPoint);
   });
 }

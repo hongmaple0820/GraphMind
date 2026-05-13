@@ -73,7 +73,8 @@ export class SyncEngine {
     let items: FileStat[];
     try {
       items = await this.client.getDirectoryContents(dirPath) as FileStat[];
-    } catch {
+    } catch (err) {
+      console.warn('Failed to scan remote directory:', err);
       return;
     }
 
@@ -103,7 +104,8 @@ export class SyncEngine {
     let entries;
     try {
       entries = await fs.readdir(dirPath, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      console.warn('Failed to scan local directory:', err);
       return;
     }
 
@@ -236,7 +238,8 @@ export class SyncEngine {
 
     try {
       await this.client.putFileContents(remotePath, content);
-    } catch {
+    } catch (err) {
+      console.warn('Simple upload failed, creating directory:', err);
       await this.client.createDirectory(remotePath.split('/').slice(0, -1).join('/'), { recursive: true }).catch(() => {});
       await this.client.putFileContents(remotePath, content);
     }
@@ -277,7 +280,8 @@ export class SyncEngine {
       try {
         const chunkRemotePath = `${tempRemotePath}.${i}`;
         await this.client.putFileContents(chunkRemotePath, chunk);
-      } catch {
+      } catch (err) {
+        console.warn('Chunk upload failed, creating directory:', err);
         await this.client.createDirectory(tempRemotePath.split('/').slice(0, -1).join('/'), { recursive: true }).catch(() => {});
         const chunkRemotePath = `${tempRemotePath}.${i}`;
         await this.client.putFileContents(chunkRemotePath, chunk);
@@ -294,7 +298,9 @@ export class SyncEngine {
     for (let i = 0; i < totalChunks; i++) {
       try {
         await this.client.deleteFile(`${tempRemotePath}.${i}`);
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to clean up chunk:', err);
+      }
     }
 
     this.pendingUploads.delete(relativePath);
@@ -313,7 +319,9 @@ export class SyncEngine {
       } else {
         await fs.writeFile(this.stateFilePath, '[]', 'utf-8');
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to save upload state:', err);
+    }
   }
 
   async loadPendingUploads(): Promise<void> {
@@ -323,7 +331,9 @@ export class SyncEngine {
       for (const s of states) {
         this.pendingUploads.set(s.relativePath, s);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to load upload state:', err);
+    }
   }
 
   async resumePendingUploads(): Promise<{ resumed: number; completed: number }> {
@@ -337,7 +347,9 @@ export class SyncEngine {
         try {
           await this.uploadFileChunked(relativePath);
           completed++;
-        } catch {}
+        } catch (err) {
+          console.warn('Failed to resume upload:', err);
+        }
       }
     }
 
@@ -354,7 +366,9 @@ export class SyncEngine {
       try {
         const stat = await fs.stat(tempLocalPath);
         existingBytes = stat.size;
-      } catch {}
+      } catch {
+        // temp file may not exist yet, that's fine
+      }
 
       if (existingBytes > 0) {
         const remoteStat = await this.client.stat(remotePath) as FileStat;
@@ -368,7 +382,8 @@ export class SyncEngine {
       await fs.mkdir(path.dirname(tempLocalPath), { recursive: true });
       await fs.writeFile(tempLocalPath, content as string, 'utf-8');
       await fs.rename(tempLocalPath, localPath);
-    } catch {
+    } catch (err) {
+      console.warn('Temp download failed, trying direct download:', err);
       const content = await this.client.getFileContents(remotePath, { format: 'text' });
       await fs.mkdir(path.dirname(localPath), { recursive: true });
       await fs.writeFile(localPath, content as string, 'utf-8');
@@ -383,8 +398,8 @@ export class SyncEngine {
       const content = await fs.readFile(localPath, 'utf-8');
       await fs.mkdir(path.dirname(backupPath), { recursive: true });
       await fs.writeFile(backupPath, content, 'utf-8');
-    } catch {
-      // file may not exist locally
+    } catch (err) {
+      console.warn('Failed to create backup:', err);
     }
   }
 
@@ -392,8 +407,8 @@ export class SyncEngine {
     try {
       await this.client.getDirectoryContents(this.remoteBasePath);
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

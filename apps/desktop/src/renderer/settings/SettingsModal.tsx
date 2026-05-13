@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useThemeStore, type ThemeMode } from '../stores/theme-store';
+import { useThemeStore } from '../stores/theme-store';
 
 interface ModelConfig {
   id: string;
@@ -46,7 +46,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         setModels(result.models);
         setAvailability(result.availability);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to load models:', err);
+    }
   }, []);
 
   const loadSyncConfig = useCallback(async () => {
@@ -63,7 +65,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         }));
         setSyncStatus('connected');
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to load sync config:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -87,14 +91,18 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     try {
       await (window as any).graphmind?.agent?.updateModel?.(modelId, updates);
       setModels((prev) => prev.map((m) => m.id === modelId ? { ...m, ...updates } : m));
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to update model:', err);
+    }
   };
 
   const handleSetPrimary = async (modelId: string) => {
     try {
       await (window as any).graphmind?.agent?.switchModel?.(modelId);
       setPrimaryModel(modelId);
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to switch model:', err);
+    }
   };
 
   const handleSaveSyncConfig = async () => {
@@ -107,7 +115,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         remotePath: syncConfig.remotePath,
         conflictStrategy: syncConfig.conflictStrategy,
       });
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to save sync config:', err);
+    }
   };
 
   const handleTestConnection = async () => {
@@ -122,9 +132,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         setSyncStatus('error');
         setSyncError(result?.error || 'Connection failed');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSyncStatus('error');
-      setSyncError(err.message);
+      setSyncError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -136,8 +146,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       } else {
         setSyncError(result?.error || 'Preview failed');
       }
-    } catch (err: any) {
-      setSyncError(err.message);
+    } catch (err: unknown) {
+      setSyncError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -153,9 +163,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         setSyncStatus('error');
         setSyncError(result?.error || 'Sync failed');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSyncStatus('error');
-      setSyncError(err.message);
+      setSyncError(err instanceof Error ? err.message : String(err));
     }
   };
 

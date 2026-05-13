@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/app-store';
-import { useThemeStore, type ThemeMode } from '../stores/theme-store';
+import { useThemeStore } from '../stores/theme-store';
+import { gmApi } from '../lib/api';
 
 interface TopBarProps {
   isIndexing?: boolean;
@@ -34,20 +35,25 @@ export function TopBar({ isIndexing, onOpenSettings }: TopBarProps) {
   useEffect(() => {
     const loadModels = async () => {
       try {
-        const result = await (window as any).graphmind?.agent?.models?.();
+        const agentApi = gmApi('agent');
+        if (!agentApi) return;
+        const result = await agentApi.call('models') as Record<string, unknown> | undefined;
         if (result?.models) {
-          const options = result.models.map((m: any) => ({
-            id: m.id,
-            name: m.name,
-            type: m.type,
-            enabled: m.enabled,
-            available: result.availability?.[m.id] ?? false,
+          const modelList = result.models as Array<Record<string, unknown>>;
+          const options = modelList.map((m) => ({
+            id: m.id as string,
+            name: m.name as string,
+            type: m.type as string,
+            enabled: m.enabled as boolean,
+            available: (result.availability as Record<string, boolean>)?.[m.id as string] ?? false,
           }));
-          setModels(options.filter((m: ModelOption) => m.enabled));
-          const primary = options.find((m: ModelOption) => m.enabled && m.available);
+          setModels(options.filter((m) => m.enabled));
+          const primary = options.find((m) => m.enabled && m.available);
           if (primary) setActiveModelId(primary.id);
         }
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to load models:', err);
+      }
     };
     loadModels();
     const interval = setInterval(loadModels, 30000);
@@ -55,24 +61,29 @@ export function TopBar({ isIndexing, onOpenSettings }: TopBarProps) {
   }, []);
 
   useEffect(() => {
-    const unsub = (window as any).graphmind?.sync?.onProgress?.(() => {
-      setSyncStatus('syncing');
-    });
-    return () => { unsub?.(); };
+    const syncApi = gmApi('sync');
+    if (!syncApi) return;
+    void syncApi.call('onProgress', () => { setSyncStatus('syncing'); });
   }, []);
 
   const handleSwitchModel = async (modelId: string) => {
     try {
-      await (window as any).graphmind?.agent?.switchModel?.(modelId);
+      const agentApi = gmApi('agent');
+      if (!agentApi) return;
+      await agentApi.call('switchModel', modelId);
       setActiveModelId(modelId);
       setShowModelSwitcher(false);
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to switch model:', err);
+    }
   };
 
   const handleSync = async () => {
     setSyncStatus('syncing');
     try {
-      await (window as any).graphmind?.sync?.start?.('bidirectional');
+      const syncApi = gmApi('sync');
+      if (!syncApi) return;
+      await syncApi.call('start', 'bidirectional');
       setSyncStatus('idle');
     } catch {
       setSyncStatus('error');
@@ -133,9 +144,9 @@ export function TopBar({ isIndexing, onOpenSettings }: TopBarProps) {
         </button>
         <button onClick={() => setThemeMode(themeMode === 'dark' ? 'light' : themeMode === 'light' ? 'system' : 'dark')} className="topbar-btn" title={`Theme: ${themeMode} (${resolvedTheme})`}>
           {resolvedTheme === 'dark' ? (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5V2.5a5.5 5.5 0 010 11z" /></svg>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M6 .278a.768.768 0 01.08.858 7.208 7.208 0 00-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 01.81.316.733.733 0 01-.031.893A8.349 8.349 0 018.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 016 .278z" /></svg>
           ) : (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5V2.5a5.5 5.5 0 010 11z" /></svg>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.06 0l1.061 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.06 1.06a.75.75 0 01-1.06 1.061l-1.06-1.06a.75.75 0 010-1.061zM0 8a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5H.75A.75.75 0 010 8zm13 0a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5A.75.75 0 0113 8zM2.343 13.657a.75.75 0 010-1.06l1.06-1.06a.75.75 0 011.061 1.06l-1.06 1.06a.75.75 0 01-1.06 0zm9.193-9.193a.75.75 0 010-1.06l1.06-1.06a.75.75 0 011.061 1.06l-1.06 1.06a.75.75 0 01-1.06 0z" /></svg>
           )}
         </button>
         <button onClick={onOpenSettings} className="topbar-btn" title="Settings (Ctrl+,)">

@@ -10,7 +10,7 @@ describe('BM25Index', () => {
 
     const results = index.query('knowledge graph', 3);
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].id).toBe('note1');
+    expect(results[0]!.id).toBe('note1');
   });
 
   it('should return empty results for no matches', () => {
@@ -36,7 +36,7 @@ describe('BM25Index', () => {
     index.addDocument('note1', 'New content about dogs');
     const results = index.query('dogs', 5);
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].id).toBe('note1');
+    expect(results[0]!.id).toBe('note1');
   });
 
   it('should handle Chinese text tokenization', () => {

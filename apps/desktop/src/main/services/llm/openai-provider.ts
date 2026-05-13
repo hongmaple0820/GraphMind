@@ -1,8 +1,8 @@
-import type { LLMProvider, CompletionRequest, CompletionResponse, StreamChunk, ModelConfig } from './types.js';
+import type { LLMProvider, CompletionRequest, CompletionResponse, StreamChunk, ModelConfig, LLMProviderType } from './types.js';
 
 export class OpenAIProvider implements LLMProvider {
   readonly id: string;
-  readonly type = 'openai' as const;
+  readonly type: LLMProviderType = 'openai';
   readonly config: ModelConfig;
 
   constructor(config: ModelConfig) {

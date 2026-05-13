@@ -44,7 +44,9 @@ export function AgentPanel() {
           const enabled = result.models.filter((m: any) => m.enabled);
           if (enabled.length > 0) setActiveModel(enabled[0].name);
         }
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to load model info:', err);
+      }
     };
     loadModel();
   }, []);

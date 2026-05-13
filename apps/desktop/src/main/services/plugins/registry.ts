@@ -36,10 +36,14 @@ export class PluginRegistry {
             if (manifest.id && manifest.name && manifest.main) {
               manifests.push(manifest);
             }
-          } catch {}
+          } catch (err) {
+            console.warn('Failed to parse plugin manifest:', err);
+          }
         }
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to scan plugins:', err);
+    }
     return manifests;
   }
 
@@ -79,7 +83,9 @@ export class PluginRegistry {
           instance.activated = false;
           this.state.pluginOrder = this.state.pluginOrder.filter((id) => id !== manifest.id);
           this.removeExtensions(manifest.id);
-        } catch {}
+        } catch (err) {
+          console.warn('Failed to deactivate plugin:', err);
+        }
       },
     };
 

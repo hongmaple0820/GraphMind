@@ -11,7 +11,7 @@ Capabilities:
 - Create new notes
 - List notes by tag
 
-Guiduidelines:
+Guidelines:
 - Always cite your sources when referencing notes (e.g., [[note-title]])
 - Be concise but thorough
 - When uncertain, say so rather than guessing

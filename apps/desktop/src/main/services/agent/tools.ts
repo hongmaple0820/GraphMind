@@ -162,11 +162,11 @@ const fileCreateTool: ToolHandler = {
     required: ['title', 'content'],
   },
   async execute(args, ctx) {
-    const tags = (args.tags as string[] ?? []).map((t) => `#${t}`).join(' ');
-    const frontmatter = tags ? `---\ntags: [${args.tags?.join(', ')}]\n---\n\n` : '';
-    const content = `${frontmatter}# ${args.title}\n\n${args.content}`;
+    const tags = ((args.tags as string[] | undefined) ?? []).map((t: string) => `#${t}`).join(' ');
+    const frontmatter = tags ? `---\ntags: [${(args.tags as string[] | undefined)?.join(', ') ?? ''}]\n---\n\n` : '';
+    const content = `${frontmatter}# ${args.title as string}\n\n${args.content as string}`;
     const result = await ctx.fileManager.create(ctx.vaultPath, args.title as string, content);
-    return { ...result, created: true };
+    return { ...result as Record<string, unknown>, created: true };
   },
 };
 

@@ -1,4 +1,4 @@
-import type { IpcMain, BrowserWindow } from 'electron';
+import type { IpcMain, BrowserWindow, MessagePortMain } from 'electron';
 import { LLMRouter } from '../services/llm/router.js';
 import { ToolRegistry, builtinTools } from '../services/agent/tools.js';
 import { AgentCore } from '../services/agent/core.js';
@@ -15,6 +15,7 @@ interface ConversationState {
 const conversations = new Map<string, ConversationState>();
 let router: LLMRouter | null = null;
 let toolRegistry: ToolRegistry | null = null;
+let activeAbortController: AbortController | null = null;
 
 function getOrCreateRouter(): LLMRouter {
   if (!router) {
@@ -33,50 +34,46 @@ function getOrCreateToolRegistry(): ToolRegistry {
   return toolRegistry;
 }
 
-function createAgentContext(vaultPath: string) {
+function createAgentContext(vaultPath: string, mainWindow: BrowserWindow) {
   return {
     graphEngine: {
       query: async (args: unknown) => {
-        if (!(globalThis as any).__mainWindow) return { nodes: [], edges: [] };
-        const win = (globalThis as any).__mainWindow as BrowserWindow;
-        return win.webContents.executeJavaScript(
+        return mainWindow.webContents.executeJavaScript(
           `window.graphmind?.graph?.query(${JSON.stringify(args)}) ?? { nodes: [], edges: [] }`,
         );
       },
-      getBacklinks: async (nodeId: string) => {
+      getBacklinks: async (_nodeId: string) => {
         return { edges: [] };
       },
     },
     fileManager: {
-      read: async (path: string) => {
-        const fs = await import('node:fs/promises');
-        return fs.readFile(path, 'utf-8');
+      read: async (filePath: string) => {
+        const fsMod = await import('node:fs/promises');
+        return fsMod.readFile(filePath, 'utf-8');
       },
-      write: async (path: string, content: string) => {
-        const fs = await import('node:fs/promises');
+      write: async (filePath: string, content: string) => {
+        const fsMod = await import('node:fs/promises');
         const pathMod = await import('node:path');
-        await fs.mkdir(pathMod.dirname(path), { recursive: true });
-        await fs.writeFile(path, content, 'utf-8');
+        await fsMod.mkdir(pathMod.dirname(filePath), { recursive: true });
+        await fsMod.writeFile(filePath, content, 'utf-8');
       },
-      create: async (vaultPath: string, title: string, content?: string) => {
-        const fs = await import('node:fs/promises');
+      create: async (vault: string, title: string, content?: string) => {
+        const fsMod = await import('node:fs/promises');
         const pathMod = await import('node:path');
         const fileName = title.replace(/[/\\?%*:|"<>]/g, '-') + '.md';
-        const filePath = pathMod.join(vaultPath, fileName);
-        await fs.writeFile(filePath, content ?? `# ${title}\n\n`, 'utf-8');
+        const filePath = pathMod.join(vault, fileName);
+        await fsMod.writeFile(filePath, content ?? `# ${title}\n\n`, 'utf-8');
         return { path: filePath, noteId: title };
       },
     },
     syncManager: {
       startSync: async (direction: string) => {
         try {
-          const { ipcMain } = await import('electron');
-          const win = (globalThis as any).__mainWindow as BrowserWindow;
-          return win.webContents.executeJavaScript(
+          return mainWindow.webContents.executeJavaScript(
             `window.graphmind?.sync?.start?.('${direction}') ?? { error: 'Sync not available' }`,
           );
-        } catch (err: any) {
-          return { success: false, error: err.message };
+        } catch (err: unknown) {
+          return { success: false, error: err instanceof Error ? err.message : String(err) };
         }
       },
       getStatus: async () => {
@@ -90,8 +87,6 @@ function createAgentContext(vaultPath: string) {
 }
 
 export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow) {
-  (globalThis as any).__mainWindow = mainWindow;
-
   ipcMain.handle('agent:chat', async (_event, args: { message: string; conversationId?: string; model?: string; vaultPath?: string }) => {
     const convId = args.conversationId ?? `conv-${Date.now()}`;
     if (!conversations.has(convId)) {
@@ -103,9 +98,12 @@ export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindo
 
     const r = getOrCreateRouter();
     const tr = getOrCreateToolRegistry();
-    const vaultPath = args.vaultPath ?? (globalThis as any).__vaultPath ?? '';
-    const ctx = createAgentContext(vaultPath);
+    const vaultPath = args.vaultPath ?? (globalThis as Record<string, unknown>).__vaultPath as string | undefined ?? '';
+    const ctx = createAgentContext(vaultPath, mainWindow);
     const agent = new AgentCore(r, tr, ctx);
+
+    const abortController = new AbortController();
+    activeAbortController = abortController;
 
     try {
       const response = await agent.chat(args.message, conv.messages.slice(0, -1));
@@ -117,15 +115,17 @@ export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindo
           for (const [noteId] of notesIndex) {
             const neighbors = new Set<string>();
             const fwd = adjacency.get(noteId);
-            if (fwd) for (const eid of fwd) neighbors.add(eid.split('--')[1]);
+            if (fwd) for (const eid of fwd) neighbors.add(eid.split('--')[1]!);
             const rev = reverseIndex.get(noteId);
-            if (rev) for (const eid of rev) neighbors.add(eid.split('--')[0]);
+            if (rev) for (const eid of rev) neighbors.add(eid.split('--')[0]!);
             if (neighbors.size > 0) {
               engine.setGraphNeighbors(noteId, Array.from(neighbors));
             }
           }
         }
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to update hybrid engine neighbors:', err);
+      }
 
       conv.messages.push({ role: 'assistant', content: response.content });
       conv.updatedAt = Date.now();
@@ -136,11 +136,45 @@ export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindo
         usage: response.usage,
         model: response.model,
       };
-    } catch (err: any) {
-      const errorMsg = `Agent error: ${err.message}\n\nPlease configure an LLM provider in Settings (Ctrl+,).\nSupported: OpenAI, Claude, Local (llama.cpp server).`;
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errorMsg = `Agent error: ${errMsg}\n\nPlease configure an LLM provider in Settings (Ctrl+,).\nSupported: OpenAI, Claude, Local (llama.cpp server).`;
       conv.messages.push({ role: 'assistant', content: errorMsg });
       return { content: errorMsg, conversationId: convId, usage: { promptTokens: 0, completionTokens: 0 } };
+    } finally {
+      activeAbortController = null;
     }
+  });
+
+  ipcMain.on('agent:chat-stream', (event, args: { message: string; conversationId?: string; model?: string }) => {
+    const ports = event.ports;
+    if (!ports || ports.length === 0) return;
+    const mainPort = ports[0]!;
+
+    const r = getOrCreateRouter();
+    const tr = getOrCreateToolRegistry();
+    const vaultPath = (globalThis as Record<string, unknown>).__vaultPath as string | undefined ?? '';
+    const ctx = createAgentContext(vaultPath, mainWindow);
+    const agent = new AgentCore(r, tr, ctx);
+
+    const abortController = new AbortController();
+    activeAbortController = abortController;
+
+    (async () => {
+      try {
+        for await (const chunk of agent.chatStream(args.message)) {
+          mainPort.postMessage(chunk);
+          if (abortController.signal.aborted) break;
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        mainPort.postMessage({ type: 'error', content: errMsg });
+      } finally {
+        mainPort.postMessage({ type: 'done' });
+        mainPort.close();
+        activeAbortController = null;
+      }
+    })();
   });
 
   ipcMain.handle('agent:conversations', async () => {
@@ -163,7 +197,11 @@ export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindo
   });
 
   ipcMain.handle('agent:abort', async () => {
-    // TODO: implement abort with AbortController
+    if (activeAbortController) {
+      activeAbortController.abort();
+      activeAbortController = null;
+    }
+    return { success: true };
   });
 
   ipcMain.handle('agent:models', async () => {
@@ -180,10 +218,10 @@ export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindo
     return { models: configs, availability };
   });
 
-  ipcMain.handle('agent:update-model', async (_event, args: { modelId: string; config: Record<string, unknown> }) => {
+  ipcMain.handle('agent:update-model', async (_event, args: { modelId: string; config: Partial<import('../services/llm/types.js').ModelConfig> }) => {
     const r = getOrCreateRouter();
-    r.updateConfig(args.modelId, args.config as any);
-    if (args.config['apiKey'] || args.config['enabled']) {
+    r.updateConfig(args.modelId, args.config);
+    if (args.config.apiKey || args.config.enabled) {
       r.registerProvider(r.getConfig(args.modelId)!);
     }
     return { success: true };

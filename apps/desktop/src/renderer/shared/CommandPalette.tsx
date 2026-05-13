@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAppStore } from '../stores/app-store';
-import { useThemeStore, type ThemeMode } from '../stores/theme-store';
+import { useThemeStore } from '../stores/theme-store';
+import { gmApi } from '../lib/api';
 
 interface Command {
   id: string;
@@ -12,7 +13,12 @@ interface Command {
   action: () => void;
 }
 
-export function CommandPalette() {
+interface CommandPaletteProps {
+  onCreateNote?: (title: string) => void;
+  onOpenSettings?: () => void;
+}
+
+export function CommandPalette({ onCreateNote, onOpenSettings }: CommandPaletteProps) {
   const open = useAppStore((s) => s.commandPaletteOpen);
   const setOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const openNote = useAppStore((s) => s.openNote);
@@ -57,7 +63,11 @@ export function CommandPalette() {
 
   const commands = useMemo<Command[]>(() => {
     const base: Command[] = [
-      { id: 'new-note', label: 'New Note', icon: '+', shortcut: 'Ctrl+N', category: 'note', action: () => { setOpen(false); } },
+      { id: 'new-note', label: 'New Note', icon: '+', shortcut: 'Ctrl+N', category: 'note', action: () => {
+        const title = window.prompt('Note title:');
+        if (title) onCreateNote?.(title);
+        setOpen(false);
+      }},
       { id: 'graph-view', label: 'Switch to Graph View', icon: 'G', shortcut: 'Ctrl+G', category: 'view', action: () => { setActiveView('graph'); setOpen(false); } },
       { id: 'editor-view', label: 'Switch to Editor View', icon: 'E', category: 'view', action: () => { setActiveView('editor'); setOpen(false); } },
       { id: 'toggle-agent', label: 'Toggle Agent Panel', icon: 'AI', shortcut: 'Ctrl+J', category: 'view', action: () => { toggleAgentPanel(); setOpen(false); } },
@@ -65,16 +75,20 @@ export function CommandPalette() {
       { id: 'theme-dark', label: 'Theme: Dark', icon: 'D', category: 'setting', action: () => { useThemeStore.getState().setMode('dark'); setOpen(false); } },
       { id: 'theme-light', label: 'Theme: Light', icon: 'L', category: 'setting', action: () => { useThemeStore.getState().setMode('light'); setOpen(false); } },
       { id: 'theme-system', label: 'Theme: System', icon: 'PC', category: 'setting', action: () => { useThemeStore.getState().setMode('system'); setOpen(false); } },
-      { id: 'settings', label: 'Open Settings', icon: 'G', shortcut: 'Ctrl+,', category: 'setting', action: () => { setOpen(false); } },
+      { id: 'settings', label: 'Open Settings', icon: 'G', shortcut: 'Ctrl+,', category: 'setting', action: () => { onOpenSettings?.(); setOpen(false); } },
       { id: 'sync', label: 'Sync with WebDAV', icon: 'S', category: 'setting', action: () => {
-        if (vaultPath) (window as any).graphmind?.sync?.start?.('bidirectional');
+        if (vaultPath) gmApi('sync')?.call('start', 'bidirectional');
         setOpen(false);
       }},
       { id: 'reindex', label: 'Re-index Vault', icon: 'I', category: 'setting', action: () => {
-        if (vaultPath) (window as any).graphmind?.file?.indexVault?.(vaultPath);
+        if (vaultPath) gmApi('file')?.call('indexVault', vaultPath);
         setOpen(false);
       }},
-      { id: 'rag-search', label: 'RAG Search...', icon: 'R', category: 'search', action: () => { setOpen(false); } },
+      { id: 'rag-search', label: 'RAG Search...', icon: 'R', category: 'search', action: () => {
+        const q = window.prompt('Search your knowledge base:');
+        if (q) gmApi('rag')?.call('query', { query: q, vaultPath: vaultPath ?? '' });
+        setOpen(false);
+      }},
     ];
 
     const noteCommands: Command[] = notes.map((n) => ({
@@ -87,7 +101,7 @@ export function CommandPalette() {
     }));
 
     return [...base, ...noteCommands];
-  }, [notes, setOpen, setActiveView, toggleAgentPanel, toggleSidebar, openNote, vaultPath]);
+  }, [notes, setOpen, setActiveView, toggleAgentPanel, toggleSidebar, openNote, vaultPath, onCreateNote, onOpenSettings]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.slice(0, 20);

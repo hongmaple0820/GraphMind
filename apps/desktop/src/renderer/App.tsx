@@ -7,6 +7,8 @@ import { MainContent } from './layout/MainContent';
 import { AgentPanel } from './agent/AgentPanel';
 import { CommandPalette } from './shared/CommandPalette';
 import { SettingsModal } from './settings/SettingsModal';
+import { ErrorBoundary } from './shared/ErrorBoundary';
+import { gmApi } from './lib/api';
 
 export function App() {
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
@@ -20,6 +22,7 @@ export function App() {
   const setVaultPath = useAppStore((s) => s.setVaultPath);
   const openNote = useAppStore((s) => s.openNote);
   const notes = useAppStore((s) => s.notes);
+  const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const initTheme = useThemeStore((s) => s.setMode);
   const themeMode = useThemeStore((s) => s.mode);
 
@@ -28,11 +31,13 @@ export function App() {
 
     const initVault = async () => {
       try {
-        const config = await (window as any).graphmind?.getConfig();
+        const config = await gmApi('config')?.call('get') as Record<string, unknown> | undefined;
         if (config?.vaultPath) {
-          setVaultPath(config.vaultPath);
+          setVaultPath(config.vaultPath as string);
         }
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to load initial config:', err);
+      }
     };
     initVault();
 
@@ -41,17 +46,24 @@ export function App() {
         e.preventDefault();
         setSettingsOpen((prev) => !prev);
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+      }
     };
     window.addEventListener('keydown', handleKeyboard);
     return () => window.removeEventListener('keydown', handleKeyboard);
   }, []);
 
   const indexVault = useCallback(async () => {
-    if (!(window as any).graphmind || !vaultPath) return;
+    const api = gmApi('file');
+    if (!api || !vaultPath) return;
     setIsIndexing(true);
     try {
-      const noteList: NoteInfo[] = await (window as any).graphmind.file.indexVault(vaultPath);
+      const noteList = await api.call('indexVault', vaultPath) as NoteInfo[];
       setNotes(noteList);
+    } catch (err) {
+      console.warn('Failed to index vault:', err);
     } finally {
       setIsIndexing(false);
     }
@@ -62,18 +74,23 @@ export function App() {
   }, [vaultPath, indexVault]);
 
   const loadNoteContent = useCallback(async (noteId: string) => {
-    if (!(window as any).graphmind) return;
     const note = notes.find((n) => n.id === noteId);
     if (!note) return;
 
     try {
-      const { content } = await (window as any).graphmind.file.read(note.filePath);
-      setFileContents((prev) => ({ ...prev, [noteId]: content }));
+      const fileApi = gmApi('file');
+      const graphApi = gmApi('graph');
+      if (!fileApi || !graphApi) return;
 
-      const bl = await (window as any).graphmind.graph.getBacklinks(noteId);
-      const blIds = (bl.edges ?? []).map((e: any) => e.source);
+      const result = await fileApi.call('read', note.filePath) as { content: string };
+      setFileContents((prev) => ({ ...prev, [noteId]: result.content }));
+
+      const bl = await graphApi.call('getBacklinks', noteId) as { edges: Array<{ source: string }> };
+      const blIds = (bl.edges ?? []).map((e) => e.source);
       setBacklinks((prev) => ({ ...prev, [noteId]: blIds }));
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to load note content:', err);
+    }
   }, [notes]);
 
   useEffect(() => {
@@ -85,59 +102,70 @@ export function App() {
   }, []);
 
   const handleNoteSave = useCallback(async (noteId: string, content: string) => {
-    if (!(window as any).graphmind) return;
     const note = notes.find((n) => n.id === noteId);
     if (!note) return;
     try {
-      await (window as any).graphmind.file.write(note.filePath, content);
-    } catch {}
+      const fileApi = gmApi('file');
+      if (!fileApi) return;
+      await fileApi.call('write', note.filePath, content);
+    } catch (err) {
+      console.warn('Failed to save note:', err);
+    }
   }, [notes]);
 
   const handleJumpToNote = useCallback((target: string) => {
     const exists = notes.some((n) => n.id === target);
-    if (exists) {
-      openNote(target);
-    }
+    if (exists) openNote(target);
   }, [notes, openNote]);
 
   const handleCreateNote = useCallback(async (title: string) => {
-    if (!(window as any).graphmind || !vaultPath) return;
+    if (!vaultPath) return;
     try {
-      const result = await (window as any).graphmind.file.create(vaultPath, title);
+      const fileApi = gmApi('file');
+      if (!fileApi) return;
+      const result = await fileApi.call('create', vaultPath, title) as { noteId: string };
       await indexVault();
       openNote(result.noteId);
       setFileContents((prev) => ({ ...prev, [result.noteId]: `# ${title}\n\n` }));
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to create note:', err);
+    }
   }, [vaultPath, indexVault, openNote]);
 
   const handleSelectVault = useCallback(async () => {
-    // In Electron, this would open a folder picker dialog
-    // For now, use default documents path
-    const config = await (window as any).graphmind?.getConfig();
-    if (config?.vaultPath) {
-      setVaultPath(config.vaultPath);
+    try {
+      const configApi = gmApi('config');
+      if (!configApi) return;
+      const config = await configApi.call('selectVault') as Record<string, unknown> | undefined;
+      if (config?.vaultPath) {
+        setVaultPath(config.vaultPath as string);
+      }
+    } catch (err) {
+      console.warn('Failed to select vault:', err);
     }
   }, [setVaultPath]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-surface-base">
-      <TopBar isIndexing={isIndexing} onOpenSettings={() => setSettingsOpen(true)} />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar onCreateNote={handleCreateNote} onSelectVault={handleSelectVault} />
-        <MainContent
-          activeNoteId={activeNoteId}
-          fileContents={fileContents}
-          backlinks={backlinks}
-          notes={notes}
-          onChange={handleNoteChange}
-          onSave={handleNoteSave}
-          onJumpToNote={handleJumpToNote}
-          onOpenNote={openNote}
-        />
+    <ErrorBoundary>
+      <div className="flex h-screen flex-col overflow-hidden bg-surface-base">
+        <TopBar isIndexing={isIndexing} onOpenSettings={() => setSettingsOpen(true)} />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar onCreateNote={handleCreateNote} onSelectVault={handleSelectVault} />
+          <MainContent
+            activeNoteId={activeNoteId}
+            fileContents={fileContents}
+            backlinks={backlinks}
+            notes={notes}
+            onChange={handleNoteChange}
+            onSave={handleNoteSave}
+            onJumpToNote={handleJumpToNote}
+            onOpenNote={openNote}
+          />
+        </div>
+        <AgentPanel />
+        <CommandPalette onCreateNote={handleCreateNote} onOpenSettings={() => setSettingsOpen(true)} />
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
-      <AgentPanel />
-      <CommandPalette />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </div>
+    </ErrorBoundary>
   );
 }

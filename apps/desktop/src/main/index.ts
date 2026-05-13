@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
+import Store from 'electron-store';
 import { registerFileHandlers } from './ipc/file-handlers.js';
 import { registerGraphHandlers } from './ipc/graph-handlers.js';
 import { registerAgentHandlers } from './ipc/agent-handlers.js';
@@ -7,6 +8,7 @@ import { registerSyncHandlers } from './ipc/sync-handlers.js';
 import { registerRAGHandlers } from './ipc/rag-handlers.js';
 import { registerPluginHandlers } from './ipc/plugin-handlers.js';
 
+const store = new Store({ name: 'graphmind-config' });
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
@@ -41,8 +43,6 @@ function createWindow() {
     mainWindow = null;
   });
 
-  (globalThis as any).__mainWindow = mainWindow;
-
   registerFileHandlers(ipcMain, mainWindow);
   registerGraphHandlers(ipcMain, mainWindow);
   registerAgentHandlers(ipcMain, mainWindow);
@@ -51,12 +51,13 @@ function createWindow() {
   registerPluginHandlers(ipcMain, mainWindow);
 
   ipcMain.handle('config:get', async () => ({
-    vaultPath: app.getPath('documents'),
-    theme: 'dark',
+    vaultPath: (store.get('vaultPath') as string) ?? app.getPath('documents'),
+    theme: (store.get('theme') as string) ?? 'dark',
   }));
 
   ipcMain.handle('config:set', async (_event, args: { key: string; value: unknown }) => {
-    // TODO: persist config via electron-store
+    store.set(args.key, args.value);
+    return { success: true };
   });
 }
 

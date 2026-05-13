@@ -34,7 +34,6 @@ export function GraphCanvas({ notes, onNoteClick }: GraphCanvasProps) {
       });
     }
 
-    const noteIds = new Set(limitedNotes.map((n) => n.id));
     const edgeSet = new Set<string>();
     for (const note of limitedNotes) {
       for (const tag of note.tags) {

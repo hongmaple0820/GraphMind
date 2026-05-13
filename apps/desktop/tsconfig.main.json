@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist/main",
-    "rootDir": "./src/main",
+    "rootDir": "../../",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -12,7 +12,11 @@
     "declarationMap": false,
     "sourceMap": true,
     "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "noUnusedParameters": false,
+    "paths": {
+      "@shared/parser/*": ["../../packages/shared/src/parser/*"],
+      "@shared/types/*": ["../../packages/shared/src/types/*"]
+    }
   },
-  "include": ["src/main", "src/main/**/*.ts"]
+  "include": ["src/main", "src/main/**/*.ts", "../../packages/shared/src"]
 }

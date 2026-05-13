@@ -30,27 +30,30 @@ class EmbeddingService {
 
       const uncached: { index: number; text: string }[] = [];
       for (let i = 0; i < texts.length; i++) {
-        const key = this.cacheKey(texts[i]);
+        const key = this.cacheKey(texts[i]!);
         const cached = this.cache.get(key);
         if (cached) {
           results[i] = cached;
         } else {
-          uncached.push({ index: i, text: texts[i] });
+          uncached.push({ index: i, text: texts[i]! });
         }
       }
 
       if (uncached.length > 0) {
         const embeddings = await this.fetchEmbeddings(uncached.map((u) => u.text));
         for (let j = 0; j < uncached.length; j++) {
-          const idx = uncached[j].index;
-          results[idx] = embeddings[j];
-          this.cache.set(this.cacheKey(uncached[j].text), embeddings[j]);
+          const idx = uncached[j]!.index;
+          const embedding = embeddings[j];
+          if (embedding) {
+            results[idx] = embedding;
+            this.cache.set(this.cacheKey(uncached[j]!.text), embedding);
+          }
         }
 
         if (this.cache.size > 10000) {
           const keys = Array.from(this.cache.keys());
           for (let k = 0; k < keys.length - 5000; k++) {
-            this.cache.delete(keys[k]);
+            this.cache.delete(keys[k]!);
           }
         }
       }

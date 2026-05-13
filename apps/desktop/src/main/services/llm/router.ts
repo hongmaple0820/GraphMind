@@ -91,6 +91,13 @@ export class LLMRouter {
     return this.primaryModelId;
   }
 
+  getPrimaryProvider(): LLMProvider | null {
+    if (this.primaryModelId) {
+      return this.getOrCreateProvider(this.primaryModelId);
+    }
+    return null;
+  }
+
   private async resolveProvider(): Promise<LLMProvider | null> {
     const candidates: string[] = [];
     if (this.primaryModelId) candidates.push(this.primaryModelId);

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseMarkdown, pathToNoteId, type ParseResult } from '@shared/parser/markdown.js';
+import { parseMarkdown, pathToNoteId } from '@shared/parser/markdown.js';
 
 interface IndexEntry {
   noteId: string;
@@ -188,8 +188,9 @@ export class IncrementalIndexer {
       const entry = this.index.get(noteId);
       if (!entry) continue;
       for (let i = 0; i < entry.paragraphs.length; i++) {
-        if (!entry.paragraphs[i].embedding) {
-          texts.push(entry.paragraphs[i].text);
+        const para = entry.paragraphs[i]!;
+        if (!para.embedding) {
+          texts.push(para.text);
           targets.push({ noteId, paragraphIdx: i });
         }
       }
@@ -204,9 +205,10 @@ export class IncrementalIndexer {
 
       for (let j = 0; j < embeddings.length; j++) {
         const target = targets[i + j];
+        if (!target) continue;
         const entry = this.index.get(target.noteId);
-        if (entry?.paragraphs[target.paragraphIdx]) {
-          entry.paragraphs[target.paragraphIdx].embedding = embeddings[j];
+        if (entry && entry.paragraphs[target.paragraphIdx]) {
+          entry.paragraphs[target.paragraphIdx]!.embedding = embeddings[j];
         }
       }
     }

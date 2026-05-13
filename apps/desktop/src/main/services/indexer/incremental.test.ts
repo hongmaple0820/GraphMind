@@ -98,7 +98,7 @@ describe('IncrementalIndexer', () => {
 
     expect(diff.paragraphChanges.size).toBe(1);
     const changes = Array.from(diff.paragraphChanges.values())[0];
-    expect(changes.added + changes.modified).toBeGreaterThan(0);
+    expect(changes!.added + changes!.modified).toBeGreaterThan(0);
   });
 
   it('should handle empty vault', async () => {
