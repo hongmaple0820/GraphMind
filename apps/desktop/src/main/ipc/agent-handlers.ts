@@ -6,6 +6,10 @@ import type { ChatMessage } from '../services/llm/types.js';
 import { notesIndex, parseCache } from './file-handlers.js';
 import { adjacency, reverseIndex } from './graph-handlers.js';
 
+import Store from 'electron-store';
+
+const modelStore = new Store({ name: 'graphmind-models' });
+
 interface ConversationState {
   messages: ChatMessage[];
   createdAt: number;
@@ -20,6 +24,14 @@ let activeAbortController: AbortController | null = null;
 function getOrCreateRouter(): LLMRouter {
   if (!router) {
     router = new LLMRouter();
+    for (const [modelId, config] of modelStore) {
+      if (config && typeof config === 'object') {
+        router.updateConfig(modelId as string, config as Partial<import('../services/llm/types.js').ModelConfig>);
+        router.registerProvider(router.getConfig(modelId as string)!);
+      }
+    }
+    const primaryId = modelStore.get('primaryModelId') as string | undefined;
+    if (primaryId) router.setPrimary(primaryId);
   }
   return router;
 }
@@ -38,12 +50,12 @@ function createAgentContext(vaultPath: string, mainWindow: BrowserWindow) {
   return {
     graphEngine: {
       query: async (args: unknown) => {
-        return mainWindow.webContents.executeJavaScript(
-          `window.graphmind?.graph?.query(${JSON.stringify(args)}) ?? { nodes: [], edges: [] }`,
-        );
+        const { handleGraphQuery } = await import('./graph-handlers.js');
+        return handleGraphQuery(args as { nodeId?: string; query?: string; hops?: number; limit?: number });
       },
-      getBacklinks: async (_nodeId: string) => {
-        return { edges: [] };
+      getBacklinks: async (nodeId: string) => {
+        const { handleGetBacklinks } = await import('./graph-handlers.js');
+        return handleGetBacklinks(nodeId);
       },
     },
     fileManager: {
@@ -163,7 +175,15 @@ export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindo
     (async () => {
       try {
         for await (const chunk of agent.chatStream(args.message)) {
-          mainPort.postMessage(chunk);
+          if (chunk.type === 'text') {
+            mainPort.postMessage({ type: 'token', content: chunk.content });
+          } else if (chunk.type === 'tool_call') {
+            mainPort.postMessage({ type: 'tool_call', toolCall: chunk.toolCall });
+          } else if (chunk.type === 'tool_result') {
+            mainPort.postMessage({ type: 'tool_result', toolResult: chunk.toolResult });
+          } else if (chunk.type === 'done') {
+            mainPort.postMessage({ type: 'done', model: chunk.finalResponse?.model, usage: chunk.finalResponse?.usage });
+          }
           if (abortController.signal.aborted) break;
         }
       } catch (err: unknown) {
@@ -218,12 +238,20 @@ export function registerAgentHandlers(ipcMain: IpcMain, mainWindow: BrowserWindo
     return { models: configs, availability };
   });
 
-  ipcMain.handle('agent:update-model', async (_event, args: { modelId: string; config: Partial<import('../services/llm/types.js').ModelConfig> }) => {
+ipcMain.handle('agent:update-model', async (_event, args: { modelId: string; config: Partial<import('../services/llm/types.js').ModelConfig> }) => {
     const r = getOrCreateRouter();
     r.updateConfig(args.modelId, args.config);
+    modelStore.set(args.modelId, r.getConfig(args.modelId));
     if (args.config.apiKey || args.config.enabled) {
       r.registerProvider(r.getConfig(args.modelId)!);
     }
+    return { success: true };
+  });
+
+  ipcMain.handle('agent:switch-model', async (_event, args: { modelId: string }) => {
+    const r = getOrCreateRouter();
+    r.setPrimary(args.modelId);
+    modelStore.set('primaryModelId', args.modelId);
     return { success: true };
   });
 }

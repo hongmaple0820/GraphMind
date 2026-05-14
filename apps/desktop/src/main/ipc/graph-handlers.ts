@@ -297,3 +297,65 @@ export function registerGraphHandlers(ipcMain: IpcMain, _mainWindow: BrowserWind
 }
 
 export { graphNodes, graphEdges, adjacency, reverseIndex };
+
+export async function handleGraphQuery(args: { nodeId?: string; query?: string; hops?: number; limit?: number }) {
+  if (args.nodeId) {
+    const hops = args.hops ?? 1;
+    const visited = new Set<string>();
+    const queue: [string, number][] = [[args.nodeId, 0]];
+    const resultNodes: GraphNode[] = [];
+    const resultEdges: GraphEdge[] = [];
+
+    while (queue.length > 0) {
+      const [currentId, depth] = queue.shift()!;
+      if (visited.has(currentId) || depth > hops) continue;
+      visited.add(currentId);
+
+      const node = graphNodes.get(currentId);
+      if (node) resultNodes.push(node);
+
+      const edgeIds = adjacency.get(currentId);
+      if (edgeIds) {
+        for (const eid of edgeIds) {
+          const edge = graphEdges.get(eid);
+          if (edge) {
+            resultEdges.push(edge);
+            if (!visited.has(edge.target)) queue.push([edge.target, depth + 1]);
+          }
+        }
+      }
+
+      const revEdgeIds = reverseIndex.get(currentId);
+      if (revEdgeIds) {
+        for (const eid of revEdgeIds) {
+          const edge = graphEdges.get(eid);
+          if (edge) {
+            resultEdges.push(edge);
+            if (!visited.has(edge.source)) queue.push([edge.source, depth + 1]);
+          }
+        }
+      }
+
+      if (resultNodes.length >= (args.limit ?? 50)) break;
+    }
+    return { nodes: resultNodes, edges: resultEdges };
+  }
+
+  if (args.query) {
+    const q = args.query.toLowerCase();
+    const results = Array.from(graphNodes.values()).filter(
+      (n) => n.title.toLowerCase().includes(q) || n.tags.some((t) => t.toLowerCase().includes(q)),
+    );
+    return { nodes: results.slice(0, args.limit ?? 20), edges: [] };
+  }
+
+  return { nodes: Array.from(graphNodes.values()), edges: Array.from(graphEdges.values()) };
+}
+
+export async function handleGetBacklinks(nodeId: string) {
+  const edgeIds = reverseIndex.get(nodeId) ?? new Set();
+  const edges = Array.from(edgeIds)
+    .map((id) => graphEdges.get(id))
+    .filter((e): e is GraphEdge => e !== undefined && e.type === 'link_ref');
+  return { edges };
+}

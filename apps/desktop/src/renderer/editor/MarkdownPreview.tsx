@@ -6,7 +6,15 @@ interface MarkdownPreviewProps {
   onLinkClick?: (target: string) => void;
 }
 
+function preprocessWikiLinks(markdown: string): string {
+  return markdown.replace(/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g, (_match, target, alias) => {
+    const display = alias ?? target;
+    return `[${display}](graphmind://note/${encodeURIComponent(target.trim())})`;
+  });
+}
+
 export function MarkdownPreview({ content, onLinkClick }: MarkdownPreviewProps) {
+  const processed = preprocessWikiLinks(content);
   return (
     <div className="markdown-preview h-full overflow-y-auto p-6 scrollbar-thin">
       <ReactMarkdown
@@ -52,7 +60,7 @@ export function MarkdownPreview({ content, onLinkClick }: MarkdownPreviewProps) 
           em: ({ children }) => <em className="italic text-[var(--color-text-secondary)]">{children}</em>,
         }}
       >
-        {content}
+        {processed}
       </ReactMarkdown>
     </div>
   );

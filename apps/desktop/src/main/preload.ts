@@ -62,6 +62,12 @@ contextBridge.exposeInMainWorld('graphmind', {
   },
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (key: string, value: unknown) => ipcRenderer.invoke('config:set', { key, value }),
+  selectVault: () => ipcRenderer.invoke('config:select-vault'),
+  onVaultChanged: (callback: (vaultPath: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, vaultPath: string) => callback(vaultPath);
+    ipcRenderer.on('config:vault-changed', handler);
+    return () => ipcRenderer.removeListener('config:vault-changed', handler);
+  },
   rag: {
     query: (args: { query: string; topK?: number; vaultPath: string }) =>
       ipcRenderer.invoke('rag:query', args),

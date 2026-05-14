@@ -8,7 +8,7 @@ import { AgentPanel } from './agent/AgentPanel';
 import { CommandPalette } from './shared/CommandPalette';
 import { SettingsModal } from './settings/SettingsModal';
 import { ErrorBoundary } from './shared/ErrorBoundary';
-import { gmApi } from './lib/api';
+import { gmApi, gmSelectVault, gmOnVaultChanged } from './lib/api';
 
 export function App() {
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
@@ -41,6 +41,10 @@ export function App() {
     };
     initVault();
 
+    const unsubscribe = gmOnVaultChanged((vp) => {
+      setVaultPath(vp);
+    });
+
     const handleKeyboard = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === ',') {
         e.preventDefault();
@@ -52,7 +56,10 @@ export function App() {
       }
     };
     window.addEventListener('keydown', handleKeyboard);
-    return () => window.removeEventListener('keydown', handleKeyboard);
+    return () => {
+      window.removeEventListener('keydown', handleKeyboard);
+      unsubscribe();
+    };
   }, []);
 
   const indexVault = useCallback(async () => {
@@ -134,11 +141,9 @@ export function App() {
 
   const handleSelectVault = useCallback(async () => {
     try {
-      const configApi = gmApi('config');
-      if (!configApi) return;
-      const config = await configApi.call('selectVault') as Record<string, unknown> | undefined;
-      if (config?.vaultPath) {
-        setVaultPath(config.vaultPath as string);
+      const result = await gmSelectVault();
+      if (result.vaultPath) {
+        setVaultPath(result.vaultPath);
       }
     } catch (err) {
       console.warn('Failed to select vault:', err);

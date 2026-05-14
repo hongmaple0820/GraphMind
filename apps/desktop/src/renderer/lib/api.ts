@@ -20,3 +20,15 @@ export function gmApi(namespace: string): ApiNamespace | undefined {
   if (!ns || typeof ns !== 'object') return undefined;
   return new ApiNamespace(ns as Record<string, unknown>);
 }
+
+export function gmSelectVault(): Promise<{ canceled?: boolean; vaultPath?: string }> {
+  const api = gm();
+  if (!api || typeof api.selectVault !== 'function') return Promise.resolve({ canceled: true });
+  return (api.selectVault as ApiFn)() as Promise<{ canceled?: boolean; vaultPath?: string }>;
+}
+
+export function gmOnVaultChanged(cb: (vaultPath: string) => void): () => void {
+  const api = gm();
+  if (!api || typeof api.onVaultChanged !== 'function') return () => {};
+  return (api.onVaultChanged as (cb: (vp: string) => void) => () => void)(cb);
+}

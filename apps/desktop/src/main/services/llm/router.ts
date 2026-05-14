@@ -129,12 +129,17 @@ export class LLMRouter {
   }
 
   private createProvider(config: ModelConfig): LLMProvider | null {
-    switch (config.type) {
-      case 'openai': return new OpenAIProvider(config);
-      case 'claude': return new ClaudeProvider(config);
-      case 'local': return new LocalProvider(config);
-      case 'custom': return new CustomProvider(config);
-      default: return null;
+    try {
+      switch (config.type) {
+        case 'openai': return new OpenAIProvider(config);
+        case 'claude': return new ClaudeProvider(config);
+        case 'local': return new LocalProvider(config);
+        case 'custom': return new CustomProvider(config);
+        default: return null;
+      }
+    } catch (err) {
+      console.warn(`Failed to create provider "${config.id}" (${config.type}):`, err);
+      return null;
     }
   }
 

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import cytoscape from 'cytoscape';
 import coseBilkent from 'cytoscape-cose-bilkent';
 import dagre from 'cytoscape-dagre';
 import { useAppStore, type NoteInfo } from '../stores/app-store';
+import { gmApi } from '../lib/api';
 
 cytoscape.use(coseBilkent);
 cytoscape.use(dagre);
@@ -14,36 +15,73 @@ interface GraphCanvasProps {
 
 const VIRTUAL_RENDER_THRESHOLD = 500;
 
+interface GraphData {
+  nodes: Array<{ id: string; title: string; tags: string[] }>;
+  edges: Array<{ id: string; source: string; target: string; type: string; weight: number }>;
+}
+
 export function GraphCanvas({ notes, onNoteClick }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const activeView = useAppStore((s) => s.activeView);
+  const [graphData, setGraphData] = useState<GraphData | null>(null);
+
+  useEffect(() => {
+    if (!activeView) return;
+    const graphApi = gmApi('graph');
+    if (graphApi) {
+      graphApi.call('query', {}).then((data) => {
+        setGraphData(data as GraphData);
+      }).catch((err) => {
+        console.warn('Failed to load graph data from main process:', err);
+      });
+    }
+  }, [activeView, notes]);
 
   useEffect(() => {
     if (!containerRef.current || !activeView) return;
 
     const elements: cytoscape.ElementDefinition[] = [];
 
-    const nodeCount = notes.length;
-    const shouldVirtualize = nodeCount > VIRTUAL_RENDER_THRESHOLD;
-    const limitedNotes = shouldVirtualize ? notes.slice(0, VIRTUAL_RENDER_THRESHOLD) : notes;
+    if (graphData && graphData.nodes.length > 0) {
+      const shouldVirtualize = graphData.nodes.length > VIRTUAL_RENDER_THRESHOLD;
+      const limitedNodes = shouldVirtualize ? graphData.nodes.slice(0, VIRTUAL_RENDER_THRESHOLD) : graphData.nodes;
+      const nodeIds = new Set(limitedNodes.map((n) => n.id));
 
-    for (const note of limitedNotes) {
-      elements.push({
-        data: { id: note.id, label: note.title || note.id, tags: note.tags },
-      });
-    }
+      for (const node of limitedNodes) {
+        elements.push({
+          data: { id: node.id, label: node.title || node.id, tags: node.tags },
+        });
+      }
 
-    const edgeSet = new Set<string>();
-    for (const note of limitedNotes) {
-      for (const tag of note.tags) {
-        for (const other of limitedNotes) {
-          if (other.id !== note.id && other.tags.includes(tag)) {
-            const edgeId = `${note.id}-${other.id}-tag`;
-            const reverseId = `${other.id}-${note.id}-tag`;
-            if (!edgeSet.has(edgeId) && !edgeSet.has(reverseId)) {
-              edgeSet.add(edgeId);
-              elements.push({ data: { id: edgeId, source: note.id, target: other.id, type: 'tag' } });
+      for (const edge of graphData.edges) {
+        if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+          elements.push({
+            data: { id: edge.id, source: edge.source, target: edge.target, type: edge.type, weight: edge.weight },
+          });
+        }
+      }
+    } else {
+      const shouldVirtualize = notes.length > VIRTUAL_RENDER_THRESHOLD;
+      const limitedNotes = shouldVirtualize ? notes.slice(0, VIRTUAL_RENDER_THRESHOLD) : notes;
+
+      for (const note of limitedNotes) {
+        elements.push({
+          data: { id: note.id, label: note.title || note.id, tags: note.tags },
+        });
+      }
+
+      const edgeSet = new Set<string>();
+      for (const note of limitedNotes) {
+        for (const tag of note.tags) {
+          for (const other of limitedNotes) {
+            if (other.id !== note.id && other.tags.includes(tag)) {
+              const edgeId = `${note.id}-${other.id}-tag`;
+              const reverseId = `${other.id}-${note.id}-tag`;
+              if (!edgeSet.has(edgeId) && !edgeSet.has(reverseId)) {
+                edgeSet.add(edgeId);
+                elements.push({ data: { id: edgeId, source: note.id, target: other.id, type: 'tag' } });
+              }
             }
           }
         }
@@ -125,9 +163,9 @@ export function GraphCanvas({ notes, onNoteClick }: GraphCanvasProps) {
         },
       ],
       layout: {
-        name: shouldVirtualize ? 'dagre' : 'cose-bilkent',
-        animate: !shouldVirtualize,
-        animationDuration: shouldVirtualize ? 0 : 500,
+        name: elements.length > VIRTUAL_RENDER_THRESHOLD ? 'dagre' : 'cose-bilkent',
+        animate: elements.length <= VIRTUAL_RENDER_THRESHOLD,
+        animationDuration: elements.length > VIRTUAL_RENDER_THRESHOLD ? 0 : 500,
         nodeRepulsion: 80000,
         idealEdgeLength: 100,
         gravity: 0.3,
@@ -150,14 +188,10 @@ export function GraphCanvas({ notes, onNoteClick }: GraphCanvasProps) {
 
     cyRef.current = cy;
 
-    if (shouldVirtualize) {
-      console.warn(`Graph virtualization: showing ${VIRTUAL_RENDER_THRESHOLD} of ${nodeCount} nodes`);
-    }
-
     return () => {
       cy.destroy();
     };
-  }, [notes, onNoteClick, activeView]);
+  }, [notes, onNoteClick, activeView, graphData]);
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-surface-base)]">
